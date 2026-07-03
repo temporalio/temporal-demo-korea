@@ -1,0 +1,20 @@
+setup:
+    python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+
+worker:
+    .venv/bin/python -m src.worker
+
+start *ARGS:
+    .venv/bin/python -m src.starter {{ARGS}}
+
+approve ORDER_ID:
+    .venv/bin/python -m src.approve {{ORDER_ID}}
+
+track ORDER_ID:
+    .venv/bin/python -m src.track {{ORDER_ID}}
+
+ui:
+    .venv/bin/uvicorn src.web.app:app --reload --port 8000
+
+test:
+    .venv/bin/pytest tests/ -v

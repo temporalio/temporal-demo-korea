@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>K-Shop | Order Now</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .status-badge { @apply px-2 py-1 rounded-full text-xs font-bold uppercase tracking-wide; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+<!-- Nav -->
+<nav class="bg-indigo-700 text-white shadow-lg">
+    <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
+        <div>
+            <h1 class="text-2xl font-bold">K-Shop</h1>
+            <p class="text-indigo-200 text-sm">Powered by Temporal</p>
+        </div>
+        <div class="flex gap-4 items-center">
+            <button onclick="showSection('shop')" class="hover:text-indigo-200 font-medium" id="nav-shop">Shop</button>
+            <button onclick="showSection('track')" class="hover:text-indigo-200 font-medium" id="nav-track">Track Order</button>
+            <a href="/admin" class="bg-indigo-600 hover:bg-indigo-500 px-3 py-1 rounded text-sm">Admin</a>
+        </div>
+    </div>
+</nav>
+
+<div class="max-w-7xl mx-auto px-4 py-8">
+
+    <!-- ═══ SHOP SECTION ═══ -->
+    <div id="section-shop">
+        <h2 class="text-2xl font-bold text-gray-800 mb-6">Products</h2>
+        <div id="product-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-10"></div>
+
+        <!-- Cart -->
+        <div id="cart-section" class="hidden bg-white rounded-xl shadow-md p-6 mb-10">
+            <h3 class="text-xl font-bold text-gray-800 mb-4">Your Cart</h3>
+            <div id="cart-items"></div>
+            <div class="flex justify-between items-center mt-4 pt-4 border-t">
+                <span class="text-lg font-bold" id="cart-total"></span>
+                <button onclick="showCheckout()" class="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 font-medium">Checkout</button>
+            </div>
+        </div>
+
+        <!-- Checkout Form -->
+        <div id="checkout-section" class="hidden bg-white rounded-xl shadow-md p-6 mb-10">
+            <h3 class="text-xl font-bold text-gray-800 mb-4">Checkout</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <input id="f-name" type="text" placeholder="Full Name" value="Kim Minjun" class="border rounded-lg px-3 py-2">
+                <input id="f-email" type="email" placeholder="Email" value="minjun.kim@example.com" class="border rounded-lg px-3 py-2">
+                <input id="f-street" type="text" placeholder="Street Address" value="123 Gangnam-daero" class="border rounded-lg px-3 py-2">
+                <input id="f-city" type="text" placeholder="City" value="Seoul" class="border rounded-lg px-3 py-2">
+                <input id="f-state" type="text" placeholder="State / Province" value="Seoul" class="border rounded-lg px-3 py-2">
+                <input id="f-zip" type="text" placeholder="Zip Code" value="06100" class="border rounded-lg px-3 py-2">
+            </div>
+            <div class="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-sm" id="approval-warning" style="display:none">
+                Orders over ₩1,000,000 require admin approval before fulfillment begins.
+            </div>
+            <div class="flex gap-3 mt-6">
+                <button onclick="placeOrder()" class="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 font-medium">Place Order</button>
+                <button onclick="hideCheckout()" class="bg-gray-200 text-gray-700 px-6 py-2 rounded-lg hover:bg-gray-300 font-medium">Back</button>
+            </div>
+        </div>
+
+        <!-- Order Confirmation -->
+        <div id="confirmation-section" class="hidden bg-white rounded-xl shadow-md p-6 mb-10">
+            <div class="text-center">
+                <div class="text-5xl mb-4">&#10003;</div>
+                <h3 class="text-xl font-bold text-green-700 mb-2">Order Placed!</h3>
+                <p class="text-gray-600 mb-2">Order ID: <span id="conf-order-id" class="font-mono font-bold"></span></p>
+                <p class="text-gray-600 mb-4">Total: <span id="conf-total" class="font-bold"></span></p>
+                <p id="conf-approval" class="text-amber-600 font-medium mb-4" style="display:none">This order requires admin approval.</p>
+                <button onclick="trackNewOrder()" class="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 font-medium">Track This Order</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ TRACK SECTION ═══ -->
+    <div id="section-track" class="hidden">
+        <h2 class="text-2xl font-bold text-gray-800 mb-6">Track Your Order</h2>
+        <div class="flex gap-3 mb-6">
+            <input id="track-input" type="text" placeholder="Enter Order ID (e.g. ORD-XXXXXXXX)" class="border rounded-lg px-4 py-2 flex-1 font-mono">
+            <button onclick="trackOrder()" class="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 font-medium">Track</button>
+        </div>
+        <div id="track-result" class="hidden"></div>
+        <div id="track-error" class="hidden text-red-600 bg-red-50 p-4 rounded-lg"></div>
+    </div>
+</div>
+
+<script>
+const cart = {};
+let products = [];
+let lastOrderId = '';
+
+// ── Init ─────────────────────────────────────────────────────────
+async function init() {
+    const res = await fetch('/api/products');
+    products = await res.json();
+    renderProducts();
+}
+
+// ── Navigation ───────────────────────────────────────────────────
+function showSection(name) {
+    document.getElementById('section-shop').classList.toggle('hidden', name !== 'shop');
+    document.getElementById('section-track').classList.toggle('hidden', name !== 'track');
+    document.getElementById('nav-shop').classList.toggle('text-indigo-200', name !== 'shop');
+    document.getElementById('nav-track').classList.toggle('text-indigo-200', name !== 'track');
+}
+
+// ── Product Rendering ────────────────────────────────────────────
+const EMOJIS = {headphones:'\u{1F3A7}',laptop:'\u{1F4BB}',toy:'\u{1F9F8}',phone:'\u{1F4F1}',box:'\u{1F4E6}',keyboard:'\u{2328}',lightstick:'\u{1F4A1}',dress:'\u{1F457}'};
+
+function renderProducts() {
+    const grid = document.getElementById('product-grid');
+    grid.innerHTML = products.map(p => `
+        <div class="bg-white rounded-xl shadow-md p-5 flex flex-col">
+            <div class="text-5xl text-center mb-3">${EMOJIS[p.image] || '\u{1F4E6}'}</div>
+            <span class="text-xs text-indigo-500 font-medium uppercase">${p.category}</span>
+            <h3 class="font-bold text-gray-800 mt-1">${p.name}</h3>
+            <p class="text-gray-500 text-sm font-mono mt-1">₩${Math.round(p.price).toLocaleString()}</p>
+            ${p.price >= 1000000 ? '<span class="text-xs text-amber-600 mt-1">Requires approval</span>' : ''}
+            <div class="mt-auto pt-3">
+                <button onclick="addToCart('${p.sku}')" class="w-full bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 text-sm font-medium">Add to Cart</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+// ── Cart ─────────────────────────────────────────────────────────
+function addToCart(sku) {
+    cart[sku] = (cart[sku] || 0) + 1;
+    renderCart();
+}
+
+function removeFromCart(sku) {
+    delete cart[sku];
+    renderCart();
+}
+
+function renderCart() {
+    const keys = Object.keys(cart);
+    const section = document.getElementById('cart-section');
+    if (keys.length === 0) { section.classList.add('hidden'); return; }
+    section.classList.remove('hidden');
+
+    const itemsDiv = document.getElementById('cart-items');
+    let total = 0;
+    itemsDiv.innerHTML = keys.map(sku => {
+        const p = products.find(x => x.sku === sku);
+        const qty = cart[sku];
+        const subtotal = p.price * qty;
+        total += subtotal;
+        return `<div class="flex justify-between items-center py-2 border-b last:border-0">
+            <div>
+                <span class="font-medium">${p.name}</span>
+                <span class="text-gray-500 text-sm ml-2">x${qty}</span>
+            </div>
+            <div class="flex items-center gap-3">
+                <span class="font-mono">₩${Math.round(subtotal).toLocaleString()}</span>
+                <button onclick="removeFromCart('${sku}')" class="text-red-400 hover:text-red-600 text-sm">Remove</button>
+            </div>
+        </div>`;
+    }).join('');
+
+    document.getElementById('cart-total').textContent = `Total: ₩${Math.round(total).toLocaleString()}`;
+    const warn = document.getElementById('approval-warning');
+    if (warn) warn.style.display = total >= 1000000 ? 'block' : 'none';
+}
+
+function showCheckout() {
+    document.getElementById('checkout-section').classList.remove('hidden');
+}
+function hideCheckout() {
+    document.getElementById('checkout-section').classList.add('hidden');
+}
+
+// ── Place Order ──────────────────────────────────────────────────
+async function placeOrder() {
+    const items = Object.entries(cart).map(([sku, quantity]) => ({sku, quantity}));
+    if (items.length === 0) return;
+
+    const body = {
+        customer_name: document.getElementById('f-name').value,
+        customer_email: document.getElementById('f-email').value,
+        items,
+        shipping_address: {
+            street: document.getElementById('f-street').value,
+            city: document.getElementById('f-city').value,
+            state: document.getElementById('f-state').value,
+            zip_code: document.getElementById('f-zip').value,
+            country: 'KR',
+        }
+    };
+
+    const res = await fetch('/api/orders', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+    if (!res.ok) { alert('Error placing order'); return; }
+
+    const data = await res.json();
+    lastOrderId = data.order_id;
+
+    // Show confirmation
+    document.getElementById('conf-order-id').textContent = data.order_id;
+    document.getElementById('conf-total').textContent = `₩${Math.round(data.total_amount).toLocaleString()}`;
+    document.getElementById('conf-approval').style.display = data.requires_approval ? 'block' : 'none';
+    document.getElementById('cart-section').classList.add('hidden');
+    document.getElementById('checkout-section').classList.add('hidden');
+    document.getElementById('confirmation-section').classList.remove('hidden');
+
+    // Clear cart
+    Object.keys(cart).forEach(k => delete cart[k]);
+}
+
+function trackNewOrder() {
+    showSection('track');
+    document.getElementById('track-input').value = lastOrderId;
+    trackOrder();
+}
+
+// ── Track Order ──────────────────────────────────────────────────
+let trackInterval = null;
+
+async function trackOrder() {
+    const orderId = document.getElementById('track-input').value.trim();
+    if (!orderId) return;
+    if (trackInterval) clearInterval(trackInterval);
+    await fetchAndRenderOrder(orderId);
+    // Auto-refresh every 2s
+    trackInterval = setInterval(() => fetchAndRenderOrder(orderId), 2000);
+}
+
+async function fetchAndRenderOrder(orderId) {
+    const errDiv = document.getElementById('track-error');
+    const resDiv = document.getElementById('track-result');
+
+    try {
+        const res = await fetch(`/api/orders/${orderId}`);
+        if (!res.ok) {
+            errDiv.textContent = 'Order not found or workflow has completed.';
+            errDiv.classList.remove('hidden');
+            resDiv.classList.add('hidden');
+            if (trackInterval) clearInterval(trackInterval);
+            return;
+        }
+        const order = await res.json();
+        errDiv.classList.add('hidden');
+        resDiv.classList.remove('hidden');
+        renderOrderDetail(order, resDiv);
+
+        // Stop polling if terminal
+        if (['DELIVERED', 'CANCELLED', 'RETURNED'].includes(order.status)) {
+            if (trackInterval) { clearInterval(trackInterval); trackInterval = null; }
+        }
+    } catch (e) {
+        errDiv.textContent = 'Error fetching order.';
+        errDiv.classList.remove('hidden');
+        resDiv.classList.add('hidden');
+    }
+}
+
+function renderOrderDetail(o, container) {
+    const statusColor = {
+        RECEIVED: 'bg-gray-100 text-gray-700',
+        PAYMENT_PROCESSING: 'bg-yellow-100 text-yellow-800',
+        PAYMENT_CONFIRMED: 'bg-green-100 text-green-700',
+        AWAITING_APPROVAL: 'bg-amber-100 text-amber-800',
+        PICKING: 'bg-blue-100 text-blue-700',
+        PICKED: 'bg-blue-100 text-blue-700',
+        PACKING: 'bg-purple-100 text-purple-700',
+        PACKED: 'bg-purple-100 text-purple-700',
+        AWAITING_PICK: 'bg-orange-100 text-orange-700',
+        SHIPPING: 'bg-cyan-100 text-cyan-700',
+        IN_TRANSIT: 'bg-cyan-100 text-cyan-800',
+        AWAITING_PACK: 'bg-orange-100 text-orange-700',
+        AWAITING_SHIP: 'bg-orange-100 text-orange-700',
+        AWAITING_DELIVERY: 'bg-orange-100 text-orange-700',
+        DELIVERED: 'bg-green-200 text-green-800',
+        CANCELLED: 'bg-red-100 text-red-700',
+    };
+
+    // Simplified pipeline for customer view (hide internal AWAITING states)
+    const STATUS_TO_STEP = {
+        'RECEIVED': 0, 'PAYMENT_PROCESSING': 1, 'PAYMENT_CONFIRMED': 2,
+        'AWAITING_PICK': 3, 'PICKING': 3, 'PICKED': 4,
+        'AWAITING_PACK': 4, 'PACKING': 5, 'PACKED': 6,
+        'AWAITING_SHIP': 6, 'SHIPPING': 7, 'IN_TRANSIT': 8,
+        'AWAITING_DELIVERY': 8, 'DELIVERED': 9,
+    };
+    const PIPELINE = ['Ordered','Payment','Confirmed','Picking','Picked','Packing','Packed','Shipping','In Transit','Delivered'];
+    const currentIdx = STATUS_TO_STEP[o.status] ?? -1;
+
+    container.innerHTML = `
+        <div class="bg-white rounded-xl shadow-md p-6">
+            <div class="flex justify-between items-start mb-4">
+                <div>
+                    <h3 class="text-lg font-bold text-gray-800">${o.order_id}</h3>
+                    <p class="text-gray-500 text-sm">${o.customer_name} &middot; ${o.customer_email}</p>
+                </div>
+                <span class="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide ${statusColor[o.status] || 'bg-gray-100'}">${o.status.replace(/_/g, ' ')}</span>
+            </div>
+
+            <!-- Pipeline progress bar -->
+            <div class="flex items-center gap-1 mb-6 overflow-x-auto">
+                ${PIPELINE.map((s, i) => {
+                    const done = i <= currentIdx && o.status !== 'CANCELLED';
+                    const active = s === o.status;
+                    return `<div class="flex items-center">
+                        <div class="w-3 h-3 rounded-full ${done ? 'bg-indigo-600' : 'bg-gray-300'} ${active ? 'ring-2 ring-indigo-300' : ''}"></div>
+                        ${i < PIPELINE.length - 1 ? `<div class="w-6 h-0.5 ${done && i < currentIdx ? 'bg-indigo-600' : 'bg-gray-300'}"></div>` : ''}
+                    </div>`;
+                }).join('')}
+            </div>
+
+            <!-- Items -->
+            <div class="mb-4">
+                <h4 class="font-medium text-gray-700 mb-2">Items</h4>
+                ${o.items.map(i => `<div class="flex justify-between text-sm py-1"><span>${i.name} x${i.quantity}</span><span class="font-mono">₩${Math.round(i.unit_price * i.quantity).toLocaleString()}</span></div>`).join('')}
+                <div class="flex justify-between font-bold mt-2 pt-2 border-t"><span>Total</span><span class="font-mono">₩${Math.round(o.total_amount).toLocaleString()}</span></div>
+            </div>
+
+            <!-- Shipment -->
+            ${o.shipment ? `
+            <div class="mb-4 p-3 bg-cyan-50 rounded-lg">
+                <h4 class="font-medium text-cyan-800 mb-1">Shipment Info</h4>
+                <p class="text-sm">Carrier: <strong>${o.shipment.carrier}</strong></p>
+                <p class="text-sm">Tracking: <strong class="font-mono">${o.shipment.tracking_number}</strong></p>
+                <p class="text-sm">ETA: <strong>${o.shipment.estimated_delivery}</strong></p>
+            </div>` : ''}
+
+            <!-- Failure -->
+            ${o.failure_reason ? `<div class="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm mb-4">Failure: ${o.failure_reason}</div>` : ''}
+
+            <!-- Status History -->
+            <details class="mt-4">
+                <summary class="cursor-pointer text-sm font-medium text-gray-500 hover:text-gray-700">Status History (${o.status_history.length} events)</summary>
+                <div class="mt-2 space-y-1">
+                    ${o.status_history.map(h => `<div class="flex gap-3 text-xs"><span class="text-gray-400 font-mono w-48">${h.timestamp}</span><span class="font-medium">${h.status}</span></div>`).join('')}
+                </div>
+            </details>
+        </div>
+    `;
+}
+
+init();
+</script>
+</body>
+</html>

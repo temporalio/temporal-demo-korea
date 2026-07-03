@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>K-Shop Admin | Fulfillment Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 min-h-screen text-gray-100">
+
+<!-- Nav -->
+<nav class="bg-gray-800 shadow-lg border-b border-gray-700">
+    <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
+        <div>
+            <h1 class="text-2xl font-bold text-white">K-Shop Admin</h1>
+            <p class="text-gray-400 text-sm">Fulfillment Dashboard &middot; Powered by Temporal</p>
+        </div>
+        <div class="flex gap-3 items-center">
+            <span id="order-count" class="text-gray-400 text-sm"></span>
+            <button onclick="refreshOrders()" class="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-sm">Refresh</button>
+            <a href="/" class="bg-indigo-600 hover:bg-indigo-500 px-3 py-1 rounded text-sm">Customer View</a>
+        </div>
+    </div>
+</nav>
+
+<div class="max-w-7xl mx-auto px-4 py-6">
+
+    <!-- Stats -->
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6" id="stats-bar"></div>
+
+    <!-- Filters -->
+    <div class="flex gap-2 mb-4 flex-wrap">
+        <button onclick="setFilter('all')" class="filter-btn px-3 py-1 rounded text-sm bg-gray-700 hover:bg-gray-600" data-filter="all">All</button>
+        <button onclick="setFilter('needs_action')" class="filter-btn px-3 py-1 rounded text-sm bg-orange-800 hover:bg-orange-700" data-filter="needs_action">Needs Action</button>
+        <button onclick="setFilter('active')" class="filter-btn px-3 py-1 rounded text-sm bg-blue-800 hover:bg-blue-700" data-filter="active">In Progress</button>
+        <button onclick="setFilter('DELIVERED')" class="filter-btn px-3 py-1 rounded text-sm bg-green-800 hover:bg-green-700" data-filter="DELIVERED">Delivered</button>
+        <button onclick="setFilter('CANCELLED')" class="filter-btn px-3 py-1 rounded text-sm bg-red-800 hover:bg-red-700" data-filter="CANCELLED">Cancelled</button>
+    </div>
+
+    <!-- Orders List -->
+    <div id="orders-list" class="space-y-3"></div>
+
+    <!-- Empty State -->
+    <div id="empty-state" class="hidden text-center py-20 text-gray-500">
+        <div class="text-5xl mb-4">&#128230;</div>
+        <p class="text-lg">No orders yet</p>
+        <p class="text-sm">Place an order from the <a href="/" class="text-indigo-400 hover:underline">customer view</a></p>
+    </div>
+
+    <!-- Detail Panel (modal) -->
+    <div id="detail-modal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50" onclick="if(event.target===this)closeDetail()">
+        <div class="bg-gray-800 rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-y-auto p-6 m-4" id="detail-content"></div>
+    </div>
+</div>
+
+<script>
+let allOrderDetails = [];
+let currentFilter = 'all';
+let refreshInterval = null;
+
+// ── Init ─────────────────────────────────────────────────────────
+async function init() {
+    await refreshOrders();
+    refreshInterval = setInterval(refreshOrders, 3000);
+}
+
+// ── Fetch all orders ─────────────────────────────────────────────
+async function refreshOrders() {
+    try {
+        const listRes = await fetch('/api/orders');
+        const workflows = await listRes.json();
+
+        document.getElementById('order-count').textContent = `${workflows.length} workflows`;
+
+        // Fetch details for each running workflow
+        const details = await Promise.allSettled(
+            workflows.map(async wf => {
+                try {
+                    const res = await fetch(`/api/orders/${wf.workflow_id}`);
+                    if (!res.ok) return {workflow_id: wf.workflow_id, status: wf.status === 'COMPLETED' ? 'COMPLETED' : 'UNKNOWN', _wf: wf};
+                    const data = await res.json();
+                    data._wf = wf;
+                    return data;
+                } catch {
+                    return {workflow_id: wf.workflow_id, status: 'UNKNOWN', _wf: wf};
+                }
+            })
+        );
+
+        allOrderDetails = details
+            .filter(r => r.status === 'fulfilled')
+            .map(r => r.value);
+
+        renderStats();
+        renderOrders();
+    } catch (e) {
+        console.error('Failed to refresh orders:', e);
+    }
+}
+
+// ── Stats ────────────────────────────────────────────────────────
+function renderStats() {
+    const counts = {};
+    allOrderDetails.forEach(o => {
+        const s = o.status || 'UNKNOWN';
+        counts[s] = (counts[s] || 0) + 1;
+    });
+
+    const statsConfig = [
+        {label: 'Total', value: allOrderDetails.length, color: 'bg-gray-800 border-gray-600'},
+        {label: 'Awaiting Approval', value: counts['AWAITING_APPROVAL'] || 0, color: 'bg-amber-900/50 border-amber-700'},
+        {label: 'Needs Action', value: (counts['AWAITING_PICK']||0)+(counts['AWAITING_PACK']||0)+(counts['AWAITING_SHIP']||0)+(counts['AWAITING_DELIVERY']||0), color: 'bg-orange-900/50 border-orange-700'},
+        {label: 'In Progress', value: (counts['PICKING']||0)+(counts['PACKING']||0)+(counts['SHIPPING']||0)+(counts['IN_TRANSIT']||0)+(counts['PAYMENT_PROCESSING']||0)+(counts['PAYMENT_CONFIRMED']||0)+(counts['PICKED']||0)+(counts['PACKED']||0)+(counts['RECEIVED']||0), color: 'bg-blue-900/50 border-blue-700'},
+        {label: 'Delivered', value: counts['DELIVERED'] || 0, color: 'bg-green-900/50 border-green-700'},
+        {label: 'Cancelled', value: counts['CANCELLED'] || 0, color: 'bg-red-900/50 border-red-700'},
+    ];
+
+    document.getElementById('stats-bar').innerHTML = statsConfig.map(s => `
+        <div class="${s.color} border rounded-lg p-3 text-center">
+            <div class="text-2xl font-bold">${s.value}</div>
+            <div class="text-xs text-gray-400 uppercase">${s.label}</div>
+        </div>
+    `).join('');
+}
+
+// ── Filter ───────────────────────────────────────────────────────
+const ACTIVE_STATUSES = ['RECEIVED','PAYMENT_PROCESSING','PAYMENT_CONFIRMED','AWAITING_APPROVAL','AWAITING_PICK','PICKING','PICKED','AWAITING_PACK','PACKING','PACKED','AWAITING_SHIP','SHIPPING','IN_TRANSIT','AWAITING_DELIVERY'];
+const AWAITING_STATUSES = ['AWAITING_PICK','AWAITING_PACK','AWAITING_SHIP','AWAITING_DELIVERY'];
+
+function setFilter(f) {
+    currentFilter = f;
+    renderOrders();
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.classList.toggle('ring-2', btn.dataset.filter === f);
+        btn.classList.toggle('ring-white', btn.dataset.filter === f);
+    });
+}
+
+function filterOrders() {
+    if (currentFilter === 'all') return allOrderDetails;
+    if (currentFilter === 'active') return allOrderDetails.filter(o => ACTIVE_STATUSES.includes(o.status));
+    if (currentFilter === 'needs_action') return allOrderDetails.filter(o => AWAITING_STATUSES.includes(o.status) || o.status === 'AWAITING_APPROVAL');
+    return allOrderDetails.filter(o => o.status === currentFilter);
+}
+
+// ── Render Orders List ───────────────────────────────────────────
+const STATUS_COLORS = {
+    RECEIVED: 'bg-gray-600', PAYMENT_PROCESSING: 'bg-yellow-700', PAYMENT_CONFIRMED: 'bg-green-700',
+    AWAITING_APPROVAL: 'bg-amber-600',
+    AWAITING_PICK: 'bg-orange-600', PICKING: 'bg-blue-600', PICKED: 'bg-blue-600',
+    AWAITING_PACK: 'bg-orange-600', PACKING: 'bg-purple-600', PACKED: 'bg-purple-600',
+    AWAITING_SHIP: 'bg-orange-600', SHIPPING: 'bg-cyan-600',
+    IN_TRANSIT: 'bg-cyan-700', AWAITING_DELIVERY: 'bg-orange-600',
+    DELIVERED: 'bg-green-600', COMPENSATING: 'bg-rose-600', CANCELLED: 'bg-red-700',
+    COMPLETED: 'bg-gray-600', UNKNOWN: 'bg-gray-700',
+};
+
+function renderOrders() {
+    const orders = filterOrders();
+    const listDiv = document.getElementById('orders-list');
+    const emptyDiv = document.getElementById('empty-state');
+
+    if (orders.length === 0 && allOrderDetails.length === 0) {
+        listDiv.innerHTML = '';
+        emptyDiv.classList.remove('hidden');
+        return;
+    }
+    emptyDiv.classList.add('hidden');
+
+    listDiv.innerHTML = orders.map(o => {
+        const orderId = o.order_id || o.workflow_id;
+        const isApproval = o.status === 'AWAITING_APPROVAL';
+        const isActive = ACTIVE_STATUSES.includes(o.status);
+
+        return `
+        <div class="bg-gray-800 rounded-lg p-4 border border-gray-700 hover:border-gray-500 cursor-pointer transition" onclick="showDetail('${orderId}')">
+            <div class="flex justify-between items-center">
+                <div class="flex items-center gap-3">
+                    <span class="font-mono font-bold text-sm">${orderId}</span>
+                    <span class="px-2 py-0.5 rounded text-xs font-bold ${STATUS_COLORS[o.status] || 'bg-gray-700'}">${(o.status || 'UNKNOWN').replace(/_/g, ' ')}</span>
+                    ${o.requires_approval ? '<span class="text-xs text-amber-400">HIGH VALUE</span>' : ''}
+                </div>
+                <div class="flex items-center gap-2">
+                    ${o.total_amount ? `<span class="font-mono text-sm text-gray-400">₩${Math.round(o.total_amount).toLocaleString()}</span>` : ''}
+                    ${isApproval ? `<button onclick="event.stopPropagation();approveOrder('${orderId}')" class="bg-green-600 hover:bg-green-500 px-3 py-1 rounded text-xs font-bold">APPROVE</button>` : ''}
+                    ${o.status === 'AWAITING_PICK' ? `<button onclick="event.stopPropagation();advanceOrder('${orderId}','advance-pick')" class="bg-orange-500 hover:bg-orange-400 px-3 py-1 rounded text-xs font-bold">START PICK</button>` : ''}
+                    ${o.status === 'AWAITING_PACK' ? `<button onclick="event.stopPropagation();advanceOrder('${orderId}','advance-pack')" class="bg-orange-500 hover:bg-orange-400 px-3 py-1 rounded text-xs font-bold">START PACK</button>` : ''}
+                    ${o.status === 'AWAITING_SHIP' ? `<button onclick="event.stopPropagation();advanceOrder('${orderId}','advance-ship')" class="bg-orange-500 hover:bg-orange-400 px-3 py-1 rounded text-xs font-bold">SHIP NOW</button>` : ''}
+                    ${o.status === 'AWAITING_DELIVERY' ? `<button onclick="event.stopPropagation();advanceOrder('${orderId}','confirm-delivery')" class="bg-green-600 hover:bg-green-500 px-3 py-1 rounded text-xs font-bold">CONFIRM DELIVERY</button>` : ''}
+                    ${isActive ? `<button onclick="event.stopPropagation();cancelOrder('${orderId}')" class="bg-red-700 hover:bg-red-600 px-2 py-1 rounded text-xs">Cancel</button>` : ''}
+                </div>
+            </div>
+            ${o.customer_name ? `<div class="text-sm text-gray-400 mt-1">${o.customer_name} &middot; ${o.items ? o.items.length + ' item(s)' : ''}</div>` : ''}
+        </div>`;
+    }).join('');
+}
+
+// ── Detail Modal ─────────────────────────────────────────────────
+async function showDetail(orderId) {
+    const modal = document.getElementById('detail-modal');
+    const content = document.getElementById('detail-content');
+
+    try {
+        const res = await fetch(`/api/orders/${orderId}`);
+        if (!res.ok) { content.innerHTML = '<p class="text-red-400">Could not load order details.</p>'; modal.classList.remove('hidden'); return; }
+        const o = await res.json();
+
+        const PIPELINE = ['RECEIVED','PAYMENT_PROCESSING','PAYMENT_CONFIRMED','AWAITING_PICK','PICKING','PICKED','AWAITING_PACK','PACKING','PACKED','AWAITING_SHIP','SHIPPING','IN_TRANSIT','AWAITING_DELIVERY','DELIVERED'];
+        const currentIdx = PIPELINE.indexOf(o.status);
+
+        content.innerHTML = `
+            <div class="flex justify-between items-start mb-4">
+                <div>
+                    <h2 class="text-xl font-bold">${o.order_id}</h2>
+                    <p class="text-gray-400 text-sm">${o.customer_name} &middot; ${o.customer_email}</p>
+                </div>
+                <div class="flex gap-2">
+                    <span class="px-3 py-1 rounded text-xs font-bold ${STATUS_COLORS[o.status]}">${o.status.replace(/_/g, ' ')}</span>
+                    <button onclick="closeDetail()" class="text-gray-400 hover:text-white text-xl">&times;</button>
+                </div>
+            </div>
+
+            <!-- Pipeline -->
+            <div class="flex items-center gap-1 mb-6 overflow-x-auto pb-2">
+                ${PIPELINE.map((s, i) => {
+                    const done = i <= currentIdx && o.status !== 'CANCELLED';
+                    const active = s === o.status;
+                    const label = s.replace(/_/g, ' ').toLowerCase();
+                    return `<div class="flex items-center flex-shrink-0">
+                        <div class="flex flex-col items-center">
+                            <div class="w-4 h-4 rounded-full ${done ? 'bg-indigo-500' : 'bg-gray-600'} ${active ? 'ring-2 ring-indigo-300' : ''}"></div>
+                            <span class="text-[10px] text-gray-500 mt-1 w-16 text-center">${label}</span>
+                        </div>
+                        ${i < PIPELINE.length - 1 ? `<div class="w-4 h-0.5 ${done && i < currentIdx ? 'bg-indigo-500' : 'bg-gray-600'} mb-4"></div>` : ''}
+                    </div>`;
+                }).join('')}
+            </div>
+
+            <!-- Items -->
+            <div class="mb-4">
+                <h4 class="font-medium text-gray-300 mb-2 text-sm uppercase">Items</h4>
+                ${o.items.map(i => `<div class="flex justify-between text-sm py-1 border-b border-gray-700"><span>${i.name} x${i.quantity}</span><span class="font-mono text-gray-400">₩${Math.round(i.unit_price * i.quantity).toLocaleString()}</span></div>`).join('')}
+                <div class="flex justify-between font-bold mt-2 pt-2"><span>Total</span><span class="font-mono">₩${Math.round(o.total_amount).toLocaleString()}</span></div>
+            </div>
+
+            <!-- Shipping Address -->
+            <div class="mb-4 p-3 bg-gray-700/50 rounded-lg text-sm">
+                <h4 class="font-medium text-gray-300 mb-1 text-xs uppercase">Shipping Address</h4>
+                <p>${o.shipping_address.street}</p>
+                <p>${o.shipping_address.city}, ${o.shipping_address.state} ${o.shipping_address.zip_code}</p>
+                <p>${o.shipping_address.country}</p>
+            </div>
+
+            <!-- Shipment -->
+            ${o.shipment ? `
+            <div class="mb-4 p-3 bg-cyan-900/30 rounded-lg text-sm">
+                <h4 class="font-medium text-cyan-300 mb-1 text-xs uppercase">Shipment</h4>
+                <p>Carrier: <strong>${o.shipment.carrier}</strong></p>
+                <p>Tracking: <strong class="font-mono">${o.shipment.tracking_number}</strong></p>
+                <p>ETA: <strong>${o.shipment.estimated_delivery}</strong></p>
+            </div>` : ''}
+
+            <!-- Failure -->
+            ${o.failure_reason ? `<div class="p-3 bg-red-900/30 border border-red-800 rounded-lg text-red-300 text-sm mb-4">Failure: ${o.failure_reason}</div>` : ''}
+
+            <!-- Compensations -->
+            ${o.compensations_run && o.compensations_run.length > 0 ? `
+            <div class="mb-4 p-3 bg-rose-900/30 border border-rose-800 rounded-lg text-sm">
+                <h4 class="font-medium text-rose-300 mb-2 text-xs uppercase">Saga Compensations Run (${o.compensations_run.length})</h4>
+                <div class="space-y-1">
+                    ${o.compensations_run.map((c, i) => `<div class="flex items-center gap-2"><span class="text-rose-400 font-mono text-xs">${o.compensations_run.length - i}.</span><span class="text-rose-200">${c.replace(/_/g, ' ')}</span><span class="text-green-400 text-xs">&#10003;</span></div>`).join('')}
+                </div>
+            </div>` : ''}
+
+            <!-- Actions -->
+            <div class="flex gap-2 mb-4 flex-wrap">
+                ${o.status === 'AWAITING_APPROVAL' ? `<button onclick="approveOrder('${o.order_id}');closeDetail()" class="bg-green-600 hover:bg-green-500 px-4 py-2 rounded font-bold text-sm">Approve Order</button>` : ''}
+                ${o.status === 'AWAITING_PICK' ? `<button onclick="advanceOrder('${o.order_id}','advance-pick');closeDetail()" class="bg-orange-500 hover:bg-orange-400 px-4 py-2 rounded font-bold text-sm">Start Picking</button>` : ''}
+                ${o.status === 'AWAITING_PACK' ? `<button onclick="advanceOrder('${o.order_id}','advance-pack');closeDetail()" class="bg-orange-500 hover:bg-orange-400 px-4 py-2 rounded font-bold text-sm">Start Packing</button>` : ''}
+                ${o.status === 'AWAITING_SHIP' ? `<button onclick="advanceOrder('${o.order_id}','advance-ship');closeDetail()" class="bg-orange-500 hover:bg-orange-400 px-4 py-2 rounded font-bold text-sm">Ship Now</button>` : ''}
+                ${o.status === 'AWAITING_DELIVERY' ? `<button onclick="advanceOrder('${o.order_id}','confirm-delivery');closeDetail()" class="bg-green-600 hover:bg-green-500 px-4 py-2 rounded font-bold text-sm">Confirm Delivery</button>` : ''}
+                ${ACTIVE_STATUSES.includes(o.status) ? `<button onclick="cancelOrder('${o.order_id}');closeDetail()" class="bg-red-700 hover:bg-red-600 px-4 py-2 rounded font-bold text-sm">Cancel Order</button>` : ''}
+            </div>
+
+            <!-- Status History -->
+            <div>
+                <h4 class="font-medium text-gray-300 mb-2 text-sm uppercase">Event History</h4>
+                <div class="space-y-1 max-h-48 overflow-y-auto">
+                    ${o.status_history.map(h => {
+                        const isComp = h.status.startsWith('COMPENSATING:');
+                        const color = isComp ? 'bg-rose-700' : (STATUS_COLORS[h.status] || 'bg-gray-700');
+                        const label = isComp ? '\u21A9 ' + h.status.replace('COMPENSATING:', '') : h.status;
+                        return `<div class="flex gap-3 text-xs"><span class="text-gray-500 font-mono w-48 flex-shrink-0">${h.timestamp}</span><span class="px-2 py-0.5 rounded ${color} text-[10px] font-bold">${label}</span></div>`;
+                    }).join('')}
+                </div>
+            </div>
+        `;
+        modal.classList.remove('hidden');
+    } catch (e) {
+        content.innerHTML = '<p class="text-red-400">Error loading details.</p>';
+        modal.classList.remove('hidden');
+    }
+}
+
+function closeDetail() {
+    document.getElementById('detail-modal').classList.add('hidden');
+}
+
+// ── Actions ──────────────────────────────────────────────────────
+async function approveOrder(orderId) {
+    await fetch(`/api/orders/${orderId}/approve`, {method: 'POST'});
+    setTimeout(refreshOrders, 500);
+}
+
+async function advanceOrder(orderId, action) {
+    await fetch(`/api/orders/${orderId}/${action}`, {method: 'POST'});
+    setTimeout(refreshOrders, 500);
+}
+
+async function cancelOrder(orderId) {
+    if (!confirm(`Cancel order ${orderId}?`)) return;
+    await fetch(`/api/orders/${orderId}/cancel`, {method: 'POST'});
+    setTimeout(refreshOrders, 500);
+}
+
+// ── Keyboard ─────────────────────────────────────────────────────
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDetail(); });
+
+init();
+</script>
+</body>
+</html>
