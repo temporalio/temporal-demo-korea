@@ -1,6 +1,6 @@
 # Demo 1: Korean Fortune AI Agent / 한국 운세 AI 에이전트
 
-> Temporal + OpenAI (GPT-5.5) | Agentic Workflow | Bilingual (KR/EN)
+> Temporal + pluggable LLM (OpenAI API or local Claude/Cursor CLI) | Agentic Workflow | Bilingual (KR/EN)
 
 ---
 
@@ -96,6 +96,25 @@ TEMPORAL_NAMESPACE=<your-namespace>.<account-id>
 TEMPORAL_API_KEY=<your-temporal-cloud-api-key>
 ```
 
+**Fortune LLM provider / 운세 LLM 제공자**
+
+**EN** &mdash; The fortune step is provider-agnostic (`src/llm.py`). Pick a backend with `FORTUNE_PROVIDER`. In **local-AI mode** the demo runs with no API key by shelling out to a coding-agent CLI you already have installed.
+
+**KO** &mdash; 운세 생성 단계는 제공자 독립적입니다(`src/llm.py`). `FORTUNE_PROVIDER`로 백엔드를 선택하세요. **로컬 AI 모드**에서는 이미 설치된 코딩 에이전트 CLI를 사용하므로 API 키 없이 데모를 실행할 수 있습니다.
+
+| Value | Backend | Requires |
+|---|---|---|
+| `openai` | OpenAI API | `OPENAI_API_KEY` |
+| `claude` | Claude Code CLI (`claude -p`) | `claude` on PATH (local-AI mode, **default**) |
+| `cursor` | Cursor CLI (`agent -p`) | `agent` on PATH (local-AI mode) |
+
+If `FORTUNE_PROVIDER` is unset, the app uses `openai` when `OPENAI_API_KEY` is set, otherwise falls back to `claude`. Override the CLI binaries with `CLAUDE_CLI_BIN` / `CURSOR_CLI_BIN`, and the CLI timeout with `LOCAL_AI_TIMEOUT` (default 90s).
+
+```dotenv
+# Local-AI mode with Claude (no API key needed):
+FORTUNE_PROVIDER=claude
+```
+
 ### 3. Setup / 설치
 
 ```bash
@@ -106,7 +125,9 @@ just setup
 
 ```bash
 # Terminal 1: Start the worker / 워커 시작
-just worker
+just worker              # uses the OpenAI API if OPENAI_API_KEY is set
+just worker-local        # local-AI mode: generate fortunes with the Claude Code CLI (no API key)
+just worker-local cursor # local-AI mode with the Cursor CLI (`agent`)
 
 # Terminal 2: Run a fortune reading / 운세 실행
 just start                                                        # Korean (default / 기본)
@@ -139,9 +160,10 @@ FortuneWorkflow (Temporal Workflow)
    |      Fun crossover: guess MBTI from Saju element
    |
    |-- Step 3: generate_fortune  (Activity - AI 운세 생성 / LLM fortune generation)
-   |      GPT-5.5 via OpenAI SDK
-   |      RetryPolicy(maximum_attempts=3), 60s timeout
-   |      Graceful fallback to mock if no API key
+   |      Pluggable provider (src/llm.py): OpenAI API, or a local
+   |      coding-agent CLI (Claude Code / Cursor) for no-API-key runs
+   |      RetryPolicy(maximum_attempts=3), 120s timeout
+   |      Graceful fallback to mock if no provider is available
    |
    v
 FortuneReading (fortune_message, advice, lucky_color, lucky_number)

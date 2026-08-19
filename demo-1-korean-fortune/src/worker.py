@@ -14,7 +14,7 @@ load_dotenv()  # load .env from project root
 
 from temporalio.worker import Worker
 
-from src import get_client
+from src import get_client, llm
 from src.activities.fortune import generate_fortune
 from src.activities.mbti import analyze_mbti
 from src.activities.saju import calculate_saju
@@ -29,7 +29,7 @@ BANNER = """
 ║   \033[96m🔮  Korean Fortune AI Agent  /  한국 운세 AI 에이전트  🔮\033[93m   ║
 ║                                                              ║
 ║   \033[97mSaju (사주) + MBTI + AI Fortune Generation\033[93m                 ║
-║   \033[97mPowered by Temporal + OpenAI\033[93m                               ║
+║   \033[97mPowered by Temporal + pluggable LLM\033[93m                        ║
 ║                                                              ║
 ║   \033[92mTask Queue: {queue:<45s}\033[93m  ║
 ║   \033[92mWorkflows:  FortuneWorkflow, InteractiveFortuneWorkflow\033[93m    ║
@@ -42,6 +42,7 @@ BANNER = """
 async def main() -> None:
     """Start the Temporal worker."""
     print(BANNER.format(queue=TASK_QUEUE))
+    print(f"\033[96mFortune LLM provider: {llm.describe_provider()}\033[0m")
     print("\033[97mConnecting to Temporal server...\033[0m")
 
     client = await get_client()
