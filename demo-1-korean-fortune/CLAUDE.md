@@ -9,7 +9,7 @@ The workflow blends two cultural phenomena popular in Korea:
 - **Saju (사주/四柱)**: Traditional Korean Four Pillars astrology based on birth date/time, using Heavenly Stems (천간) and Earthly Branches (지지)
 - **MBTI**: Personality type analysis, which is hugely popular in Korean culture
 
-An AI agent (OpenAI) ties them together into a personalized fortune reading, all orchestrated reliably through Temporal.
+An AI agent ties them together into a personalized fortune reading, all orchestrated reliably through Temporal. The LLM backend is pluggable (`src/llm.py`): the OpenAI API, or **local-AI mode** using a coding-agent CLI (Claude Code or Cursor) so the demo runs with no API key.
 
 ## Quick Start
 
@@ -21,14 +21,16 @@ just setup
 temporal server start-dev
 
 # 3. Start the worker (in one terminal)
-just worker
+just worker              # OpenAI API (if OPENAI_API_KEY set)
+just worker-local        # local-AI mode via Claude Code CLI (no API key)
+just worker-local cursor # local-AI mode via Cursor CLI
 
 # 4. Run a fortune reading (in another terminal)
 just start --name "홍길동" --birth-date 1990-05-15
 just start --name "John" --birth-date 1995-03-22 --mbti ENFP --lang en
 ```
 
-Set `OPENAI_API_KEY` in a `.env` file (project root) for real LLM-powered fortunes. Without it, the demo uses a mock fortune generator.
+Provider selection is env-driven via `FORTUNE_PROVIDER` (`openai` | `claude` | `cursor`). If unset, it uses `openai` when `OPENAI_API_KEY` is present, otherwise defaults to the local `claude` CLI. If the chosen provider is unavailable or errors, the activity falls back to a deterministic mock fortune. See `.env.example` for all knobs (`CLAUDE_CLI_BIN`, `CURSOR_CLI_BIN`, `LOCAL_AI_TIMEOUT`).
 
 ## Architecture
 
@@ -40,7 +42,7 @@ FortuneWorkflow (Temporal Workflow)
    |
    |-- Step 1: calculate_saju    (Activity - deterministic calculation)
    |-- Step 2: analyze_mbti      (Activity - lookup + optional element-based guess)
-   |-- Step 3: generate_fortune  (Activity - LLM call via OpenAI SDK)
+   |-- Step 3: generate_fortune  (Activity - LLM call via pluggable provider)
    |
    v
 FortuneReading (result)
@@ -50,7 +52,7 @@ FortuneReading (result)
 - **Activities** (`src/activities/`): Each step is a separate activity with its own timeout
   - `saju.py`: Implements the Four Pillars calculation using Heavenly Stems and Earthly Branches
   - `mbti.py`: MBTI analysis with a fun element-to-MBTI crossover mapping
-  - `fortune.py`: LLM call to OpenAI with retry policy for resilience
+  - `fortune.py`: LLM call via the pluggable provider (`src/llm.py`) with retry policy for resilience
 - **Models** (`src/models.py`): Pydantic models for all data structures
 - **Worker** (`src/worker.py`): Registers workflows and activities on `korean-fortune-queue`
 - **Starter** (`src/starter.py`): CLI client with real-time status polling and pretty-printed output
@@ -83,7 +85,8 @@ demo-1-korean-fortune/
       __init__.py
       saju.py             # Saju (Four Pillars) calculation
       mbti.py             # MBTI personality analysis
-      fortune.py          # AI fortune generation (OpenAI)
+      fortune.py          # AI fortune generation (pluggable provider)
+    llm.py                # LLM provider dispatch: openai / claude / cursor
     workflows/
       __init__.py
       fortune_workflow.py # Main orchestration workflow

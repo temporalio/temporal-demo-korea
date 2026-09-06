@@ -1,18 +1,19 @@
-"""Fortune generation activity using OpenAI.
+"""Fortune generation activity.
 
 This activity combines Saju and MBTI results and uses an LLM to generate
-a personalized fortune reading. If the OPENAI_API_KEY is not set, it
-falls back to a mock fortune for demo purposes.
+a personalized fortune reading. The LLM provider is pluggable (see
+``src.llm``): the hosted OpenAI API, or a local coding-agent CLI (Claude
+Code or Cursor) for "local-AI mode" with no API key. If no provider can be
+reached, it falls back to a deterministic mock fortune for demo purposes.
 """
 
 from __future__ import annotations
 
-import json
-import os
 import random
 
 from temporalio import activity
 
+from src import llm
 from src.models import (
     FortuneReading,
     Language,
@@ -90,8 +91,8 @@ Respond in the following JSON format ONLY (no other text):
 def _generate_mock_fortune(
     saju: SajuResult, mbti: MBTIAnalysis, user: UserInput
 ) -> FortuneReading:
-    """Generate a mock fortune when no API key is available."""
-    activity.logger.warning("OPENAI_API_KEY not set; generating mock fortune for demo")
+    """Generate a mock fortune when no LLM provider is available."""
+    activity.logger.warning("No LLM provider available; generating mock fortune for demo")
 
     is_ko = user.language == Language.KO
     lucky_number = random.randint(1, 99)
@@ -137,38 +138,25 @@ def _generate_mock_fortune(
 async def generate_fortune(
     saju: SajuResult, mbti: MBTIAnalysis, user: UserInput
 ) -> FortuneReading:
-    """Generate a personalized fortune reading using OpenAI.
+    """Generate a personalized fortune reading via the active LLM provider.
 
-    Falls back to a mock fortune if OPENAI_API_KEY is not set.
+    The provider (OpenAI, local Claude Code CLI, or local Cursor CLI) is
+    selected from the environment; see :mod:`src.llm`. Falls back to a mock
+    fortune if the provider is unavailable or the call fails.
     """
-    activity.logger.info(f"Generating fortune for {user.name}")
-
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
+    try:
+        provider = llm.resolve_provider()
+    except llm.LLMError as e:
+        activity.logger.error(f"{e}. Falling back to mock fortune.")
         return _generate_mock_fortune(saju, mbti, user)
 
-    from openai import OpenAI
+    activity.logger.info(f"Generating fortune for {user.name} via {provider}")
 
-    client = OpenAI(api_key=api_key)
     prompt = _build_prompt(saju, mbti, user)
 
     try:
-        response = client.chat.completions.create(
-            model="gpt-5.5",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=1024,
-            temperature=0.8,
-        )
-
-        response_text = response.choices[0].message.content.strip()
-
-        # Strip markdown code fences if present
-        if response_text.startswith("```"):
-            lines = response_text.split("\n")
-            response_text = "\n".join(lines[1:-1])
-
-        data = json.loads(response_text)
-
+        response_text = await llm.generate_completion(prompt)
+        data = llm.extract_json(response_text)
         return FortuneReading(
             saju=saju,
             mbti=mbti,

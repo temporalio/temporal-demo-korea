@@ -13,6 +13,17 @@ from src.workflows.interactive_workflow import InteractiveFortuneWorkflow, StepP
 TASK_QUEUE = "test-interactive-queue"
 
 
+@pytest.fixture(autouse=True)
+def _force_mock_fortune(monkeypatch):
+    """Keep tests hermetic: force the deterministic mock fortune path.
+
+    Selecting the `openai` provider with no key makes generate_fortune fall
+    back to the mock instead of shelling out to a real coding-agent CLI.
+    """
+    monkeypatch.setenv("FORTUNE_PROVIDER", "openai")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+
 @pytest.fixture
 async def env():
     async with await WorkflowEnvironment.start_time_skipping() as env:
