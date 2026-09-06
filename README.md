@@ -96,7 +96,7 @@ See each demo's README for the full connection guide (local vs. Temporal Cloud).
 ## Repository Structure / 저장소 구조
 
 ```
-temporal-demo/
+temporal-demo-korea/
   justfile                     # Root task runner (orchestrates both demos)
   demo-1-korean-fortune/       # Agentic AI demo (Saju + MBTI + LLM)
   demo-2-logistics/            # Logistics / fulfillment demo (saga, signals, queries)
